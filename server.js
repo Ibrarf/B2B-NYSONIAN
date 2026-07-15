@@ -2,19 +2,100 @@ require("dotenv").config();
 
 const express    = require("express");
 const cors       = require("cors");
+const helmet     = require("helmet");
+const rateLimit  = require("express-rate-limit");
 const { Pool }   = require("pg");
 
 const app = express();
-app.use(cors());
-app.use(express.json());
 
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
+// ── Security headers (XSS, clickjacking, MIME sniffing, etc.) ────────────────
+app.use(helmet());
+
+// ── CORS — restrict to known origins only ────────────────────────────────────
+const ALLOWED_ORIGINS = [
+  "http://localhost:5173",       // Vite dev
+  "http://localhost:4173",       // Vite preview
+  process.env.FRONTEND_URL,     // Production URL (set in .env)
+].filter(Boolean);
+
+app.use(cors({
+  origin(origin, cb) {
+    // Allow requests with no origin (same-origin, curl, Postman in dev)
+    if (!origin || ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
+    cb(new Error(`CORS: origin ${origin} not allowed`));
+  },
+  methods: ["GET", "POST"],
+  allowedHeaders: ["Content-Type"],
+}));
+
+// ── Body size limit — prevent oversized payload attacks ──────────────────────
+app.use(express.json({ limit: "50kb" }));
+
+// ── Rate limiting — max 60 write requests per minute per IP ─────────────────
+const writeLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { ok: false, error: "Too many requests. Please slow down." },
 });
 
-// POST /api/b2b-entries — called only when user clicks "Add entry"
-app.post("/api/b2b-entries", async (req, res) => {
+// ── PostgreSQL connection ─────────────────────────────────────────────────────
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.DB_SSL === "true" ? { rejectUnauthorized: false } : false,
+  max: 10,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 5000,
+});
+
+// ── Input validators ──────────────────────────────────────────────────────────
+const ALLOWED_STATUS         = ["Received", "Paid", "Partially Received", "Due", ""];
+const ALLOWED_PAYMENT_TERMS  = ["Net 0", "Net 30", "Net 40", "Net 45", "Net 60", ""];
+const ALLOWED_DELIVERY       = ["Company", "Self", ""];
+
+function isDate(v) { return !v || /^\d{4}-\d{2}-\d{2}$/.test(v); }
+function isStr(v, max = 500) { return typeof v === "string" && v.length <= max; }
+function isNum(v) { return typeof v === "number" && isFinite(v) && v >= 0; }
+
+function validateEntry(d) {
+  const errors = [];
+  if (!isStr(d.customer, 200) || !d.customer?.trim())   errors.push("customer required");
+  if (!isStr(d.company,  200) || !d.company?.trim())    errors.push("company required");
+  if (!isStr(d.invoice,  100) || !d.invoice?.trim())    errors.push("invoice required");
+  if (!isDate(d.invoiceDate))                            errors.push("invalid invoiceDate");
+  if (!isNum(d.qty) || d.qty <= 0 || !Number.isInteger(d.qty)) errors.push("qty must be positive integer");
+  if (!isNum(d.unitPrice))                               errors.push("unitPrice must be non-negative number");
+  if (!isStr(d.orderNo, 30))                             errors.push("invalid orderNo");
+  if (!ALLOWED_STATUS.includes(d.status))                errors.push("invalid status value");
+  if (!ALLOWED_PAYMENT_TERMS.includes(d.paymentTerms))   errors.push("invalid paymentTerms value");
+  if (!ALLOWED_DELIVERY.includes(d.delivery))            errors.push("invalid delivery value");
+  if (!isDate(d.dueDate))                                errors.push("invalid dueDate");
+  if (!isDate(d.paymentRecDate))                         errors.push("invalid paymentRecDate");
+  if (!isDate(d.shipmentDate))                           errors.push("invalid shipmentDate");
+  if (!isStr(d.product,       300))  errors.push("product too long");
+  if (!isStr(d.sku,           100))  errors.push("sku too long");
+  if (!isStr(d.remarks,       1000)) errors.push("remarks too long");
+  if (!isStr(d.financeRemarks,1000)) errors.push("financeRemarks too long");
+  if (!isStr(d.fulfilledMonth, 50))  errors.push("fulfilledMonth too long");
+  if (!isStr(d.paymentRecMonth,50))  errors.push("paymentRecMonth too long");
+  if (!isStr(d.closedWon,     200))  errors.push("closedWon too long");
+  return errors;
+}
+
+// ── POST /api/b2b-entries ────────────────────────────────────────────────────
+app.post("/api/b2b-entries", writeLimiter, async (req, res) => {
   const d = req.body;
+
+  // Validate
+  const errors = validateEntry(d);
+  if (errors.length) {
+    return res.status(400).json({ ok: false, error: errors.join("; ") });
+  }
+
+  // Recalculate total server-side — never trust client-sent total
+  const total = Number((d.qty * d.unitPrice).toFixed(2));
+
   try {
     const result = await pool.query(
       `INSERT INTO b2b.entries (
@@ -26,22 +107,41 @@ app.post("/api/b2b-entries", async (req, res) => {
         $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21
       ) RETURNING id, order_no, created_at`,
       [
-        d.customer, d.company, d.product, d.invoice, d.invoiceDate, d.sku,
-        d.qty, d.unitPrice, d.total, d.paymentTerms, d.dueDate, d.orderNo,
-        d.status, d.paymentRecDate, d.shipmentDate, d.fulfilledMonth,
-        d.paymentRecMonth, d.delivery, d.remarks, d.financeRemarks, d.closedWon,
+        d.customer.trim(), d.company.trim(), (d.product || "").trim(),
+        d.invoice.trim(), d.invoiceDate || null, (d.sku || "").trim(),
+        d.qty, d.unitPrice, total,
+        d.paymentTerms || "", d.dueDate || null, d.orderNo,
+        d.status || "", d.paymentRecDate || null, d.shipmentDate || null,
+        d.fulfilledMonth || "", d.paymentRecMonth || "",
+        d.delivery || "Company",
+        (d.remarks || "").trim(), (d.financeRemarks || "").trim(),
+        (d.closedWon || "").trim(),
       ]
     );
     const row = result.rows[0];
-    console.log(`[+] Saved: ${d.company} | ${d.orderNo} | $${d.total} (db id ${row.id})`);
+    // Log without sensitive financial details
+    console.log(`[+] Entry saved: db_id=${row.id} order=${row.order_no}`);
     res.json({ ok: true, id: row.id, orderNo: row.order_no, createdAt: row.created_at });
   } catch (err) {
+    // Log full error server-side only — never send DB internals to client
     console.error("DB insert error:", err.message);
-    res.status(500).json({ ok: false, error: err.message });
+    res.status(500).json({ ok: false, error: "Failed to save entry. Please try again." });
   }
 });
 
+// ── GET /api/health ───────────────────────────────────────────────────────────
 app.get("/api/health", (_req, res) => res.json({ ok: true }));
 
+// ── 404 catch-all ────────────────────────────────────────────────────────────
+app.use((_req, res) => res.status(404).json({ ok: false, error: "Not found" }));
+
+// ── Global error handler — prevent stack traces leaking to client ─────────────
+app.use((err, _req, res, _next) => {
+  console.error("Unhandled error:", err.message);
+  res.status(500).json({ ok: false, error: "Internal server error" });
+});
+
 const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => console.log(`API server running on http://localhost:${PORT}`));
+app.listen(PORT, "127.0.0.1", () =>
+  console.log(`API server running on http://127.0.0.1:${PORT}`)
+);
