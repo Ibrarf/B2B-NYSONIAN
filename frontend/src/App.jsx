@@ -22,7 +22,7 @@ const TABS = [
 ];
 
 export default function App() {
-  const [activeTab,   setActiveTab]   = useState("dashboard");
+  const [activeTab,   setActiveTab]   = useState(() => localStorage.getItem("activeTab") || "dashboard");
   const [pageKey,     setPageKey]     = useState(0);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const active = TABS.find(t => t.id === activeTab);
@@ -30,6 +30,7 @@ export default function App() {
   function switchTab(id) {
     if (id === activeTab) return;
     setActiveTab(id);
+    localStorage.setItem("activeTab", id);
     setPageKey(k => k + 1);
   }
 
