@@ -40,6 +40,20 @@ const writeLimiter = rateLimit({
   message: { ok: false, error: "Too many requests. Please slow down." },
 });
 
+// ── API key authentication ────────────────────────────────────────────────────
+const API_KEY = process.env.API_KEY;
+if (!API_KEY) {
+  console.error("FATAL: API_KEY not set in .env — server will reject all requests");
+}
+
+function requireApiKey(req, res, next) {
+  const key = req.headers["x-api-key"];
+  if (!key || key !== API_KEY) {
+    return res.status(401).json({ ok: false, error: "Unauthorized" });
+  }
+  next();
+}
+
 // ── PostgreSQL connection ─────────────────────────────────────────────────────
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -84,7 +98,7 @@ function validateEntry(d) {
 }
 
 // ── POST /api/b2b-entries ────────────────────────────────────────────────────
-app.post("/api/b2b-entries", writeLimiter, async (req, res) => {
+app.post("/api/b2b-entries", requireApiKey, writeLimiter, async (req, res) => {
   const d = req.body;
 
   // Validate

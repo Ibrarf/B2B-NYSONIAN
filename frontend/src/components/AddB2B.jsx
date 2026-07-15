@@ -258,7 +258,10 @@ export default function AddB2B() {
     try {
       await fetch("/api/b2b-entries", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": import.meta.env.VITE_API_KEY || "",
+        },
         body: JSON.stringify(entry),
       });
     } catch (err) {
