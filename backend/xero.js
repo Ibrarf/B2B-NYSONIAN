@@ -78,8 +78,8 @@ async function getAccessToken() {
     { "Authorization": `Basic ${credentials}`, "Content-Type": "application/x-www-form-urlencoded" }
   );
 
+  if (status !== 200) throw new Error(`Xero token endpoint returned ${status}: ${JSON.stringify(data)}`);
   if (data.error) throw new Error(`Xero token refresh failed: ${data.error_description || data.error}`);
-  if (status !== 200) throw new Error(`Xero token endpoint returned ${status}`);
 
   accessToken = data.access_token;
   tokenExpiry = Date.now() + data.expires_in * 1000;
@@ -91,7 +91,11 @@ async function getAccessToken() {
       const envPath    = path.join(__dirname, ".env");
       const envContent = fs.readFileSync(envPath, "utf8");
       const updated    = envContent.replace(/^XERO_REFRESH_TOKEN=.*/m, `XERO_REFRESH_TOKEN=${refreshToken}`);
-      fs.writeFileSync(envPath, updated, "utf8");
+      if (updated === envContent) {
+        console.warn("[Xero] XERO_REFRESH_TOKEN line not found in .env — new token NOT persisted:", refreshToken);
+      } else {
+        fs.writeFileSync(envPath, updated, "utf8");
+      }
     } catch (err) {
       console.warn("[Xero] Could not auto-update XERO_REFRESH_TOKEN in .env:", err.message);
       console.warn("[Xero] New refresh token:", refreshToken);

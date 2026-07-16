@@ -10,30 +10,30 @@ const { createInvoice }  = require("./xero");
 
 const app = express();
 
-// ── Security headers (XSS, clickjacking, MIME sniffing, etc.) ────────────────
+// ── Security headers ──────────────────────────────────────────────────────────
 app.use(helmet());
 
 // ── CORS — restrict to known origins only ────────────────────────────────────
 const ALLOWED_ORIGINS = [
-  "http://localhost:5173",       // Vite dev
-  "http://localhost:4173",       // Vite preview
-  process.env.FRONTEND_URL,     // Production URL (set in .env)
+  "http://localhost:5173",
+  "http://localhost:5174",   // Vite fallback port
+  "http://localhost:4173",   // Vite preview
+  process.env.FRONTEND_URL,
 ].filter(Boolean);
 
 app.use(cors({
   origin(origin, cb) {
-    // Allow requests with no origin (same-origin, curl, Postman in dev)
     if (!origin || ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
     cb(new Error(`CORS: origin ${origin} not allowed`));
   },
-  methods: ["GET", "POST"],
-  allowedHeaders: ["Content-Type"],
+  methods: ["GET", "POST", "PATCH"],
+  allowedHeaders: ["Content-Type", "x-api-key"],
 }));
 
-// ── Body size limit — prevent oversized payload attacks ──────────────────────
+// ── Body size limit ───────────────────────────────────────────────────────────
 app.use(express.json({ limit: "50kb" }));
 
-// ── Rate limiting — max 60 write requests per minute per IP ─────────────────
+// ── Rate limiting — 60 write requests / minute / IP ──────────────────────────
 const writeLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 60,
@@ -65,11 +65,16 @@ const pool = new Pool({
   connectionTimeoutMillis: 5000,
 });
 
+// ── Ensure currency column exists (safe migration on startup) ─────────────────
+pool.query("ALTER TABLE b2b.entries ADD COLUMN IF NOT EXISTS currency TEXT DEFAULT 'USD'")
+  .then(() => console.log("[DB] currency column ready"))
+  .catch(err => console.error("[DB] currency migration failed:", err.message));
+
 // ── Input validators ──────────────────────────────────────────────────────────
-const ALLOWED_STATUS         = ["Received", "Paid", "Partially Received", "Due", ""];
-const ALLOWED_PAYMENT_TERMS  = ["Net 0", "Net 30", "Net 40", "Net 45", "Net 60", ""];
-const ALLOWED_DELIVERY       = ["Company", "Self", ""];
-const ALLOWED_CURRENCIES     = ["USD", "GBP", "EUR", "CAD", "AUD", "NZD", "SGD", "HKD", "JPY", "CHF", ""];
+const ALLOWED_STATUS        = ["Received", "Paid", "Partially Received", "Due", ""];
+const ALLOWED_PAYMENT_TERMS = ["Net 0", "Net 30", "Net 40", "Net 45", "Net 60", ""];
+const ALLOWED_DELIVERY      = ["Company", "Self", ""];
+const ALLOWED_CURRENCIES    = ["USD", "GBP", "EUR", "CAD", "AUD", "NZD", "SGD", "HKD", "JPY", "CHF", ""];
 
 function isDate(v) { return !v || /^\d{4}-\d{2}-\d{2}$/.test(v); }
 function isStr(v, max = 500) { return typeof v === "string" && v.length <= max; }
@@ -90,65 +95,47 @@ function validateEntry(d) {
   if (!isDate(d.dueDate))                                errors.push("invalid dueDate");
   if (!isDate(d.paymentRecDate))                         errors.push("invalid paymentRecDate");
   if (!isDate(d.shipmentDate))                           errors.push("invalid shipmentDate");
-  if (!isStr(d.product,       300))  errors.push("product too long");
-  if (!isStr(d.sku,           100))  errors.push("sku too long");
-  if (!isStr(d.remarks,       1000)) errors.push("remarks too long");
-  if (!isStr(d.financeRemarks,1000)) errors.push("financeRemarks too long");
-  if (!isStr(d.fulfilledMonth, 50))  errors.push("fulfilledMonth too long");
-  if (!isStr(d.paymentRecMonth,50))  errors.push("paymentRecMonth too long");
-  if (!isStr(d.closedWon,     200))  errors.push("closedWon too long");
+  if (!isStr(d.product,        300))  errors.push("product too long");
+  if (!isStr(d.sku,            100))  errors.push("sku too long");
+  if (!isStr(d.remarks,        1000)) errors.push("remarks too long");
+  if (!isStr(d.financeRemarks, 1000)) errors.push("financeRemarks too long");
+  if (!isStr(d.fulfilledMonth,  50))  errors.push("fulfilledMonth too long");
+  if (!isStr(d.paymentRecMonth, 50))  errors.push("paymentRecMonth too long");
+  if (!isStr(d.closedWon,      200))  errors.push("closedWon too long");
   if (d.currency !== undefined && !ALLOWED_CURRENCIES.includes(d.currency)) errors.push("invalid currency value");
   return errors;
 }
 
-// ── POST /api/b2b-entries ────────────────────────────────────────────────────
-app.post("/api/b2b-entries", requireApiKey, writeLimiter, async (req, res) => {
-  const d = req.body;
+// ── Shared INSERT helper ──────────────────────────────────────────────────────
+async function insertLineItem(header, item) {
+  const total = Number(((item.qty || 0) * (item.unitPrice || 0)).toFixed(2));
+  const result = await pool.query(
+    `INSERT INTO b2b.entries (
+      customer, company, product, invoice, invoice_date, sku,
+      qty, unit_price, total, payment_terms, due_date, order_no,
+      status, payment_rec_date, shipment_date, fulfilled_month,
+      payment_rec_month, delivery, remarks, finance_remarks, closed_won, currency
+    ) VALUES (
+      $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22
+    ) RETURNING id, order_no, created_at`,
+    [
+      header.customer.trim(), header.company.trim(), (item.product || "").trim(),
+      header.invoice.trim(), header.invoiceDate || null, (item.sku || "").trim(),
+      item.qty, item.unitPrice, total,
+      header.paymentTerms || "", header.dueDate || null, header.orderNo,
+      header.status || "", header.paymentRecDate || null, header.shipmentDate || null,
+      header.fulfilledMonth || "", header.paymentRecMonth || "",
+      header.delivery || "Company",
+      (header.remarks || "").trim(), (header.financeRemarks || "").trim(),
+      (header.closedWon || "").trim(),
+      header.currency || "USD",
+    ]
+  );
+  return result.rows[0];
+}
 
-  // Validate
-  const errors = validateEntry(d);
-  if (errors.length) {
-    return res.status(400).json({ ok: false, error: errors.join("; ") });
-  }
-
-  // Recalculate total server-side — never trust client-sent total
-  const total = Number((d.qty * d.unitPrice).toFixed(2));
-
-  try {
-    const result = await pool.query(
-      `INSERT INTO b2b.entries (
-        customer, company, product, invoice, invoice_date, sku,
-        qty, unit_price, total, payment_terms, due_date, order_no,
-        status, payment_rec_date, shipment_date, fulfilled_month,
-        payment_rec_month, delivery, remarks, finance_remarks, closed_won
-      ) VALUES (
-        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21
-      ) RETURNING id, order_no, created_at`,
-      [
-        d.customer.trim(), d.company.trim(), (d.product || "").trim(),
-        d.invoice.trim(), d.invoiceDate || null, (d.sku || "").trim(),
-        d.qty, d.unitPrice, total,
-        d.paymentTerms || "", d.dueDate || null, d.orderNo,
-        d.status || "", d.paymentRecDate || null, d.shipmentDate || null,
-        d.fulfilledMonth || "", d.paymentRecMonth || "",
-        d.delivery || "Company",
-        (d.remarks || "").trim(), (d.financeRemarks || "").trim(),
-        (d.closedWon || "").trim(),
-      ]
-    );
-    const row = result.rows[0];
-    // Log without sensitive financial details
-    console.log(`[+] Entry saved: db_id=${row.id} order=${row.order_no}`);
-    res.json({ ok: true, id: row.id, orderNo: row.order_no, createdAt: row.created_at });
-  } catch (err) {
-    // Log full error server-side only — never send DB internals to client
-    console.error("DB insert error:", err.message);
-    res.status(500).json({ ok: false, error: "Failed to save entry. Please try again." });
-  }
-});
-
-// ── POST /api/b2b-invoice ────────────────────────────────────────────────────
-// Saves all line items to DB and creates one DRAFT invoice in Xero.
+// ── POST /api/b2b-invoice ─────────────────────────────────────────────────────
+// Save all line items to DB and create one Xero DRAFT invoice.
 app.post("/api/b2b-invoice", requireApiKey, writeLimiter, async (req, res) => {
   const { header, lineItems } = req.body;
 
@@ -156,7 +143,6 @@ app.post("/api/b2b-invoice", requireApiKey, writeLimiter, async (req, res) => {
     return res.status(400).json({ ok: false, error: "header and lineItems[] required" });
   }
 
-  // Validate each combined entry
   const allErrors = [];
   lineItems.forEach((item, i) => {
     const errs = validateEntry({ ...header, ...item });
@@ -166,40 +152,16 @@ app.post("/api/b2b-invoice", requireApiKey, writeLimiter, async (req, res) => {
     return res.status(400).json({ ok: false, error: allErrors.join("; ") });
   }
 
-  // Insert each line item as a separate DB row
   const savedRows = [];
   try {
     for (const item of lineItems) {
-      const total = Number(((item.qty || 0) * (item.unitPrice || 0)).toFixed(2));
-      const result = await pool.query(
-        `INSERT INTO b2b.entries (
-          customer, company, product, invoice, invoice_date, sku,
-          qty, unit_price, total, payment_terms, due_date, order_no,
-          status, payment_rec_date, shipment_date, fulfilled_month,
-          payment_rec_month, delivery, remarks, finance_remarks, closed_won
-        ) VALUES (
-          $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21
-        ) RETURNING id, order_no, created_at`,
-        [
-          header.customer.trim(), header.company.trim(), (item.product || "").trim(),
-          header.invoice.trim(), header.invoiceDate || null, (item.sku || "").trim(),
-          item.qty, item.unitPrice, total,
-          header.paymentTerms || "", header.dueDate || null, header.orderNo,
-          header.status || "", header.paymentRecDate || null, header.shipmentDate || null,
-          header.fulfilledMonth || "", header.paymentRecMonth || "",
-          header.delivery || "Company",
-          (header.remarks || "").trim(), (header.financeRemarks || "").trim(),
-          (header.closedWon || "").trim(),
-        ]
-      );
-      savedRows.push(result.rows[0]);
+      savedRows.push(await insertLineItem(header, item));
     }
   } catch (err) {
     console.error("DB insert error:", err.message);
     return res.status(500).json({ ok: false, error: "Failed to save entries. Please try again." });
   }
 
-  // Create one Xero DRAFT invoice (non-fatal if Xero is unavailable)
   let xeroResult = null;
   try {
     xeroResult = await createInvoice(header, lineItems);
@@ -220,13 +182,47 @@ app.post("/api/b2b-invoice", requireApiKey, writeLimiter, async (req, res) => {
   });
 });
 
+// ── PATCH /api/b2b-order/:orderNo ─────────────────────────────────────────────
+// Replace all line items for an order and update header fields in DB.
+app.patch("/api/b2b-order/:orderNo", requireApiKey, writeLimiter, async (req, res) => {
+  const { orderNo } = req.params;
+  const { header, lineItems } = req.body;
+
+  if (!orderNo || !header || !Array.isArray(lineItems) || lineItems.length === 0) {
+    return res.status(400).json({ ok: false, error: "orderNo, header, and lineItems[] required" });
+  }
+
+  const allErrors = [];
+  lineItems.forEach((item, i) => {
+    const errs = validateEntry({ ...header, ...item });
+    if (errs.length) allErrors.push(`Line ${i + 1}: ${errs.join(", ")}`);
+  });
+  if (allErrors.length) {
+    return res.status(400).json({ ok: false, error: allErrors.join("; ") });
+  }
+
+  try {
+    // Delete existing rows for this order, then re-insert
+    await pool.query("DELETE FROM b2b.entries WHERE order_no = $1", [orderNo]);
+    const savedRows = [];
+    for (const item of lineItems) {
+      savedRows.push(await insertLineItem(header, item));
+    }
+    console.log(`[~] Order updated: ${savedRows.length} line(s), order=${orderNo}`);
+    res.json({ ok: true, ids: savedRows.map(r => r.id), orderNo });
+  } catch (err) {
+    console.error("DB update error:", err.message);
+    res.status(500).json({ ok: false, error: "Failed to update entry. Please try again." });
+  }
+});
+
 // ── GET /api/health ───────────────────────────────────────────────────────────
 app.get("/api/health", (_req, res) => res.json({ ok: true }));
 
-// ── 404 catch-all ────────────────────────────────────────────────────────────
+// ── 404 catch-all ─────────────────────────────────────────────────────────────
 app.use((_req, res) => res.status(404).json({ ok: false, error: "Not found" }));
 
-// ── Global error handler — prevent stack traces leaking to client ─────────────
+// ── Global error handler ──────────────────────────────────────────────────────
 app.use((err, _req, res, _next) => {
   console.error("Unhandled error:", err.message);
   res.status(500).json({ ok: false, error: "Internal server error" });

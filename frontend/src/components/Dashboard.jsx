@@ -119,7 +119,7 @@ export default function Dashboard() {
   const totalFulfilled  = monthlyRevenue.reduce((s, r) => s + r.fulfilled, 0);
   const totalReceived   = monthlyRevenue.reduce((s, r) => s + r.received,  0);
   const outstanding     = transactions.filter(t => t.status === "Partially Received").reduce((s, t) => s + t.total, 0);
-  const badDebt         = transactions.filter(t => t.financeRemarks === "bad debt").reduce((s, t) => s + t.total, 0);
+  const badDebt         = transactions.filter(t => t.financeRemarks?.toLowerCase().includes("bad debt")).reduce((s, t) => s + t.total, 0);
   const uniqueCompanies = [...new Set(transactions.map(t => t.company))].length;
   const uniqueInvoices  = [...new Set(transactions.map(t => t.invoice).filter(Boolean))].length;
 
@@ -172,15 +172,21 @@ export default function Dashboard() {
       {/* Heading */}
       <div>
         <h1 className="text-xl font-semibold text-gray-900">Overview</h1>
-        <p className="text-sm text-gray-400 mt-0.5">B2B Sales & Finance — Jun 2025 to Mar 2026</p>
+        <p className="text-sm text-gray-400 mt-0.5">
+          {transactions.length > 0 ? (() => {
+            const dates = transactions.map(t => t.invoiceDate).filter(Boolean).sort();
+            const fmt2  = d => new Date(d + "T00:00:00").toLocaleDateString("en-US", { month: "short", year: "numeric" });
+            return `B2B Sales & Finance — ${fmt2(dates[0])} to ${fmt2(dates[dates.length - 1])}`;
+          })() : "B2B Sales & Finance"}
+        </p>
       </div>
 
       {/* Primary KPIs */}
       <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
-        <PrimaryKPI label="Total Fulfilled"  rawValue={Math.round(totalFulfilled)} sub="Jun 2025 – Mar 2026"  accentBorder="border-l-indigo-400" valueCls="text-gray-900"   bgCls="bg-white"         delay={0}   />
-        <PrimaryKPI label="Total Received"   rawValue={Math.round(totalReceived)}  sub="Payments collected"   accentBorder="border-l-emerald-400" valueCls="text-gray-900"   bgCls="bg-white"         delay={60}  />
-        <PrimaryKPI label="Outstanding"      rawValue={Math.round(outstanding)}    sub="Partially received"   accentBorder="border-l-amber-400"   valueCls="text-amber-700"  bgCls="bg-amber-50/40"   delay={120} />
-        <PrimaryKPI label="Bad Debt"         rawValue={Math.round(badDebt)}        sub="EDF Brands – TR-01"   accentBorder="border-l-red-400"     valueCls="text-red-600"    bgCls="bg-red-50/40"     delay={180} />
+        <PrimaryKPI label="Total Fulfilled"  rawValue={Math.round(totalFulfilled)} sub="All fulfilled invoices"  accentBorder="border-l-indigo-400" valueCls="text-gray-900"   bgCls="bg-white"         delay={0}   />
+        <PrimaryKPI label="Total Received"   rawValue={Math.round(totalReceived)}  sub="Payments collected"      accentBorder="border-l-emerald-400" valueCls="text-gray-900"   bgCls="bg-white"         delay={60}  />
+        <PrimaryKPI label="Outstanding"      rawValue={Math.round(outstanding)}    sub="Partially received"      accentBorder="border-l-amber-400"   valueCls="text-amber-700"  bgCls="bg-amber-50/40"   delay={120} />
+        <PrimaryKPI label="Bad Debt"         rawValue={Math.round(badDebt)}        sub="Flagged in finance notes" accentBorder="border-l-red-400"    valueCls="text-red-600"    bgCls="bg-red-50/40"     delay={180} />
       </div>
 
       {/* Secondary stats */}

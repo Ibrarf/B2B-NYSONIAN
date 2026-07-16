@@ -348,6 +348,9 @@ export default function AddB2B() {
     const errs = validate();
     if (Object.keys(errs).length) { setErrors(errs); return; }
 
+    setSaveError(null);
+    setSubmitting(true);
+
     const header = {
       customer:        form.customer.trim(),
       company:         form.company.trim(),
@@ -368,21 +371,47 @@ export default function AddB2B() {
       closedWon:       savedEntry.closedWon || "",
     };
 
-    // Update ALL line items tied to this entry (by orderNo)
-    form.lineItems.forEach((item, idx) => {
+    const lineItems = form.lineItems.map(item => ({
+      product:   item.product.trim(),
+      sku:       item.sku.trim(),
+      qty:       Number(item.qty),
+      unitPrice: parseFloat(item.unitPrice) || 0,
+    }));
+
+    try {
+      const res = await fetch(`/api/b2b-order/${encodeURIComponent(form.orderNo)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", "x-api-key": import.meta.env.VITE_API_KEY || "" },
+        body: JSON.stringify({ header, lineItems }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setSaveError(body.error || `Server error ${res.status} — update not saved.`);
+        setSubmitting(false);
+        return;
+      }
+    } catch (err) {
+      setSaveError("Could not reach the server. Make sure node server.js is running.");
+      setSubmitting(false);
+      return;
+    }
+
+    // Update local state to reflect changes
+    lineItems.forEach((item, idx) => {
       const updatedItem = {
         ...header,
-        product:   item.product.trim(),
-        sku:       item.sku.trim(),
-        qty:       Number(item.qty),
-        unitPrice: parseFloat(item.unitPrice) || 0,
-        total:     Number(((parseFloat(item.qty) || 0) * (parseFloat(item.unitPrice) || 0)).toFixed(2)),
+        product:   item.product,
+        sku:       item.sku,
+        qty:       item.qty,
+        unitPrice: item.unitPrice,
+        total:     Number((item.qty * item.unitPrice).toFixed(2)),
         id:        savedEntry.id + idx,
       };
       updateTransaction(savedEntry.id + idx, updatedItem);
     });
 
     setSavedEntry({ ...header, lineItems: form.lineItems, id: savedEntry.id });
+    setSubmitting(false);
     setMode("success");
   }
 
@@ -727,7 +756,7 @@ export default function AddB2B() {
                   <div className="flex items-center gap-2 text-xs text-gray-500">
                     {form.invoice && <span className="font-mono font-semibold text-indigo-600">INV {form.invoice}</span>}
                     {form.invoiceDate && <span className="text-gray-300">·</span>}
-                    {form.invoiceDate && <span>{new Date(form.invoiceDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</span>}
+                    {form.invoiceDate && <span>{new Date(form.invoiceDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</span>}
                   </div>
                 )}
 
@@ -774,7 +803,7 @@ export default function AddB2B() {
 
                 {form.dueDate && (
                   <p className="text-xs text-gray-400">
-                    Due {new Date(form.dueDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                    Due {new Date(form.dueDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
                   </p>
                 )}
               </div>
