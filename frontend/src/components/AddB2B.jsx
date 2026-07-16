@@ -231,7 +231,8 @@ export default function AddB2B() {
     if (!form.invoiceDate)      e.invoiceDate = true;
     if (!form.dueDate)          e.dueDate     = true;
     form.lineItems.forEach((item, idx) => {
-      if (!item.qty || isNaN(item.qty) || Number(item.qty) <= 0) e[`li_${idx}_qty`] = true;
+      const qty = Number(item.qty);
+      if (!item.qty || isNaN(qty) || qty <= 0 || !Number.isInteger(qty)) e[`li_${idx}_qty`] = true;
     });
     return e;
   }
@@ -271,20 +272,30 @@ export default function AddB2B() {
       total:     Number(((parseFloat(item.qty) || 0) * (parseFloat(item.unitPrice) || 0)).toFixed(2)),
     }));
 
+    let dbError = false;
     for (const entry of entries) {
       try {
-        await fetch("/api/b2b-entries", {
+        const res = await fetch("/api/b2b-entries", {
           method: "POST",
           headers: { "Content-Type": "application/json", "x-api-key": import.meta.env.VITE_API_KEY || "" },
           body: JSON.stringify(entry),
         });
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          console.error("Server rejected entry:", body.error || res.status);
+          dbError = true;
+        }
       } catch (err) {
-        console.error("Failed to save to DB:", err);
+        console.error("Failed to reach server:", err);
+        dbError = true;
       }
       addTransaction(entry);
     }
 
-    setSavedEntry({ ...header, lineItems: form.lineItems, id: transactions.length + 1 });
+    if (dbError) console.warn("One or more entries may not have saved to the database.");
+
+    const newId = Math.max(0, ...transactions.map(t => t.id)) + 1;
+    setSavedEntry({ ...header, lineItems: form.lineItems, id: newId });
     setMode("success");
   }
 
@@ -337,20 +348,24 @@ export default function AddB2B() {
       delivery:        form.delivery,
       remarks:         form.remarks.trim(),
       financeRemarks:  form.financeRemarks.trim(),
+      closedWon:       savedEntry.closedWon || "",
     };
 
-    const firstItem = form.lineItems[0];
-    const updated = {
-      ...savedEntry, ...header,
-      product:   firstItem.product.trim(),
-      sku:       firstItem.sku.trim(),
-      qty:       Number(firstItem.qty),
-      unitPrice: parseFloat(firstItem.unitPrice) || 0,
-      total:     Number(((parseFloat(firstItem.qty) || 0) * (parseFloat(firstItem.unitPrice) || 0)).toFixed(2)),
-    };
+    // Update ALL line items tied to this entry (by orderNo)
+    form.lineItems.forEach((item, idx) => {
+      const updatedItem = {
+        ...header,
+        product:   item.product.trim(),
+        sku:       item.sku.trim(),
+        qty:       Number(item.qty),
+        unitPrice: parseFloat(item.unitPrice) || 0,
+        total:     Number(((parseFloat(item.qty) || 0) * (parseFloat(item.unitPrice) || 0)).toFixed(2)),
+        id:        savedEntry.id + idx,
+      };
+      updateTransaction(savedEntry.id + idx, updatedItem);
+    });
 
-    updateTransaction(savedEntry.id, updated);
-    setSavedEntry({ ...updated, lineItems: form.lineItems });
+    setSavedEntry({ ...header, lineItems: form.lineItems, id: savedEntry.id });
     setMode("success");
   }
 
@@ -510,11 +525,11 @@ export default function AddB2B() {
                   <div className="grid grid-cols-3 gap-3">
                     <div>
                       <Label req>Quantity</Label>
-                      <input type="number" min="1" value={item.qty}
+                      <input type="number" min="1" step="1" value={item.qty}
                         onChange={e => updateLineItem(idx, "qty", e.target.value)}
                         placeholder="0"
                         className={inp(errors[`li_${idx}_qty`] ? "border-red-300 focus:ring-red-300 focus:border-red-300" : "")} />
-                      {errors[`li_${idx}_qty`] && <FieldError />}
+                      {errors[`li_${idx}_qty`] && <FieldError msg="Whole number required" />}
                     </div>
                     <div>
                       <Label>Unit price</Label>
@@ -633,12 +648,14 @@ export default function AddB2B() {
               <div>
                 <Label>Remarks</Label>
                 <textarea value={form.remarks} onChange={e => set("remarks", e.target.value)}
-                  placeholder="Anything worth noting…" rows={3} className={`${inp()} resize-none`} />
+                  placeholder="Anything worth noting…" rows={3} maxLength={1000} className={`${inp()} resize-none`} />
+                <p className="text-[10px] text-gray-300 mt-1 text-right">{form.remarks.length}/1000</p>
               </div>
               <div>
                 <Label>Finance remarks</Label>
                 <textarea value={form.financeRemarks} onChange={e => set("financeRemarks", e.target.value)}
-                  placeholder="e.g. bad debt, June-2026…" rows={3} className={`${inp()} resize-none`} />
+                  placeholder="e.g. bad debt, June-2026…" rows={3} maxLength={1000} className={`${inp()} resize-none`} />
+                <p className="text-[10px] text-gray-300 mt-1 text-right">{form.financeRemarks.length}/1000</p>
               </div>
             </div>
           </div>

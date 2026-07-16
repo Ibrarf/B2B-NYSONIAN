@@ -67,6 +67,7 @@ const pool = new Pool({
 const ALLOWED_STATUS         = ["Received", "Paid", "Partially Received", "Due", ""];
 const ALLOWED_PAYMENT_TERMS  = ["Net 0", "Net 30", "Net 40", "Net 45", "Net 60", ""];
 const ALLOWED_DELIVERY       = ["Company", "Self", ""];
+const ALLOWED_CURRENCIES     = ["USD", "GBP", "EUR", "CAD", "AUD", "NZD", "SGD", "HKD", "JPY", "CHF", ""];
 
 function isDate(v) { return !v || /^\d{4}-\d{2}-\d{2}$/.test(v); }
 function isStr(v, max = 500) { return typeof v === "string" && v.length <= max; }
@@ -94,6 +95,7 @@ function validateEntry(d) {
   if (!isStr(d.fulfilledMonth, 50))  errors.push("fulfilledMonth too long");
   if (!isStr(d.paymentRecMonth,50))  errors.push("paymentRecMonth too long");
   if (!isStr(d.closedWon,     200))  errors.push("closedWon too long");
+  if (d.currency !== undefined && !ALLOWED_CURRENCIES.includes(d.currency)) errors.push("invalid currency value");
   return errors;
 }
 
