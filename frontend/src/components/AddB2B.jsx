@@ -76,7 +76,7 @@ function AutocompleteInput({ value, onChange, onSelect, options, placeholder, er
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-const fmt = (n) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(n);
+const fmt = (n, currency = "USD") => new Intl.NumberFormat("en-US", { style: "currency", currency }).format(n);
 const inp = (err = "") => `w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-sm text-gray-800 placeholder-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400 transition-shadow ${err}`;
 const sel = () => `w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400`;
 
@@ -563,7 +563,7 @@ export default function AddB2B() {
                       <Label>Line total</Label>
                       <div className="w-full px-3 py-2 bg-white border border-gray-100 rounded-lg text-sm font-semibold text-gray-700 h-[38px] flex items-center">
                         {lineTotal > 0
-                          ? fmt(lineTotal)
+                          ? fmt(lineTotal, form.currency)
                           : <span className="text-gray-300 font-normal text-xs">auto-calculated</span>}
                       </div>
                     </div>
@@ -582,7 +582,7 @@ export default function AddB2B() {
               <div className="flex justify-end mt-3 pr-1">
                 <div className="text-right">
                   <p className="text-xs text-gray-400 mb-0.5">Invoice total ({form.lineItems.length} items)</p>
-                  <p className="text-2xl font-bold text-gray-900">{fmt(total)}</p>
+                  <p className="text-2xl font-bold text-gray-900">{fmt(total, form.currency)}</p>
                 </div>
               </div>
             )}
@@ -754,10 +754,10 @@ export default function AddB2B() {
 
                 {total > 0 && (
                   <div className="pt-2 border-t border-gray-50">
-                    <p className="text-2xl font-bold text-gray-900 tracking-tight">{fmt(total)}</p>
+                    <p className="text-2xl font-bold text-gray-900 tracking-tight">{fmt(total, form.currency)}</p>
                     {form.lineItems.length === 1 && form.lineItems[0].qty && form.lineItems[0].unitPrice && (
                       <p className="text-xs text-gray-400 mt-0.5">
-                        {form.lineItems[0].qty} × {fmt(parseFloat(form.lineItems[0].unitPrice))}
+                        {form.lineItems[0].qty} × {fmt(parseFloat(form.lineItems[0].unitPrice), form.currency)}
                       </p>
                     )}
                     {form.lineItems.length > 1 && (
