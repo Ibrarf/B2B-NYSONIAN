@@ -409,16 +409,10 @@ export default function AddB2B() {
             <p className="text-sm text-gray-300 mb-1">Xero sync pending</p>
           )}
           <p className="text-sm text-gray-400 mb-6">Visible across Dashboard, Transactions, and Client Tracker.</p>
-          <div className="flex items-center justify-center gap-3">
-            <button onClick={handleEditEntry}
-              className="px-4 py-2 border border-gray-200 bg-white text-sm font-medium text-gray-700 rounded-lg hover:bg-gray-50 transition-colors">
-              Edit this entry
-            </button>
-            <button onClick={() => { setForm(emptyForm()); setErrors({}); setSavedEntry(null); setMode("add"); }}
-              className="px-4 py-2 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-gray-700 transition-colors">
-              Add another entry
-            </button>
-          </div>
+          <button onClick={() => { setForm(emptyForm()); setErrors({}); setSavedEntry(null); setMode("add"); }}
+            className="px-6 py-2.5 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-gray-700 transition-colors">
+            Done
+          </button>
         </div>
       </div>
     );
