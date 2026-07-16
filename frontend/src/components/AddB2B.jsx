@@ -7,6 +7,10 @@ import { productCatalog, productForSku, colorForSku } from "../data/products";
 const PAYMENT_TERMS = ["Net 0", "Net 30", "Net 40", "Net 45", "Net 60"];
 const STATUSES      = ["Received", "Paid", "Partially Received", "Due"];
 const DELIVERY      = ["Company", "Self"];
+const CURRENCIES    = [
+  "USD", "GBP", "EUR", "CAD", "AUD",
+  "NZD", "SGD", "HKD", "JPY", "CHF",
+];
 const MONTHS        = [
   "", "June-2025", "July-2025", "August-2025", "September-2025",
   "October-2025", "November-2025", "December-2025",
@@ -104,6 +108,7 @@ const emptyForm = () => ({
   product: "",          // just product name, saved to DB
   sku: "",
   invoice: "", invoiceDate: "", qty: "", unitPrice: "",
+  currency: "USD",
   paymentTerms: "", dueDate: "", orderNo: generateOrderNo(),
   status: "", paymentRecDate: "", shipmentDate: "",
   fulfilledMonth: "", paymentRecMonth: "",
@@ -241,6 +246,7 @@ export default function AddB2B() {
       qty:             Number(form.qty),
       unitPrice:       parseFloat(form.unitPrice) || 0,
       total,
+      currency:        form.currency || "USD",
       paymentTerms:    form.paymentTerms || "Net 40",
       dueDate:         form.dueDate,
       orderNo:         form.orderNo,
@@ -428,7 +434,7 @@ export default function AddB2B() {
           {/* ── Payment ── */}
           <div>
             <Divider title="Payment details" />
-            <div className="grid grid-cols-2 gap-4 mb-4">
+            <div className="grid grid-cols-3 gap-4 mb-4">
               <div>
                 <Label>Terms</Label>
                 <select value={form.paymentTerms} onChange={e => set("paymentTerms", e.target.value)} className={sel()}>
@@ -439,6 +445,13 @@ export default function AddB2B() {
               <div>
                 <Label>Due date</Label>
                 <input type="date" value={form.dueDate} onChange={e => set("dueDate", e.target.value)} className={inp()} />
+              </div>
+              <div>
+                <Label>Currency</Label>
+                <select value={form.currency} onChange={e => set("currency", e.target.value)} className={sel()}>
+                  {CURRENCIES.map(c => <option key={c}>{c}</option>)}
+                </select>
+                <p className="text-[11px] text-gray-400 mt-1">Passed to Xero on sync</p>
               </div>
             </div>
             <div className="grid grid-cols-2 gap-4">
@@ -569,6 +582,11 @@ export default function AddB2B() {
                 <div className="flex flex-wrap items-center gap-2 pt-1">
                   <StatusBadge status={form.status} />
                   {form.paymentTerms && <span className="text-xs text-gray-400">{form.paymentTerms}</span>}
+                  {form.currency && form.currency !== "USD" && (
+                    <span className="text-[10px] font-semibold bg-indigo-50 text-indigo-600 px-1.5 py-0.5 rounded">
+                      {form.currency}
+                    </span>
+                  )}
                 </div>
 
                 {form.dueDate && (
