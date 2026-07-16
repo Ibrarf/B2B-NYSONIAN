@@ -7,6 +7,9 @@ xero-setup.js
 frontend/.env
 frontend/.env.local
 frontend/.env.production
+backend/.env
+backend/.env.local
+backend/.env.production
 *.log
 .claude/
 credentials.json

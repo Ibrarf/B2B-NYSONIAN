@@ -8,13 +8,15 @@ const PAYMENT_TERMS = ["Net 0", "Net 30", "Net 40", "Net 45", "Net 60"];
 const STATUSES      = ["Received", "Paid", "Partially Received", "Due"];
 const DELIVERY      = ["Company", "Self"];
 const CURRENCIES    = ["USD", "GBP", "EUR", "CAD", "AUD", "NZD", "SGD", "HKD", "JPY", "CHF"];
-const MONTHS        = [
-  "", "June-2025", "July-2025", "August-2025", "September-2025",
-  "October-2025", "November-2025", "December-2025",
-  "January-2026", "February-2026", "March-2026",
-  "April-2026", "May-2026", "June-2026", "July-2026",
-  "August-2026", "September-2026", "October-2026",
-];
+const MONTHS = (() => {
+  const list = [""];
+  const now = new Date();
+  for (let i = -3; i <= 12; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
+    list.push(d.toLocaleString("en-US", { month: "long" }) + "-" + d.getFullYear());
+  }
+  return list;
+})();
 
 // ── Order number generator ────────────────────────────────────────────────────
 function generateOrderNo() {
