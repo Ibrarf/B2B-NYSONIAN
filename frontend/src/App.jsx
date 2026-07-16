@@ -39,7 +39,7 @@ export default function App() {
 
       {/* Sidebar */}
       <aside
-        className="shrink-0 flex flex-col bg-white border-r border-gray-200 overflow-hidden transition-all duration-250 ease-in-out"
+        className="shrink-0 flex flex-col bg-white border-r border-gray-200 overflow-hidden transition-all duration-250 ease-in-out sticky top-0 h-screen"
         style={{ width: sidebarOpen ? "216px" : "0px" }}
       >
         <div className="w-[216px] flex flex-col flex-1">
