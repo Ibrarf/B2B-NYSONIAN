@@ -115,6 +115,8 @@ export default function AddB2B() {
   const [errors,     setErrors]     = useState({});
   const [mode,       setMode]       = useState("add"); // "add" | "success" | "edit"
   const [savedEntry, setSavedEntry] = useState(null);
+  const [saveError,  setSaveError]  = useState(null);
+  const [submitting, setSubmitting] = useState(false);
 
   // Grand total across all line items
   const total = form.lineItems.reduce(
@@ -243,6 +245,9 @@ export default function AddB2B() {
     const errs = validate();
     if (Object.keys(errs).length) { setErrors(errs); return; }
 
+    setSaveError(null);
+    setSubmitting(true);
+
     const header = {
       customer:        form.customer.trim(),
       company:         form.company.trim(),
@@ -280,15 +285,18 @@ export default function AddB2B() {
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
-        console.error("Server rejected invoice:", body.error || res.status);
-      } else {
-        xeroInvoiceId = body.xeroInvoiceId || null;
+        setSaveError(body.error || `Server error ${res.status} — entry not saved to database.`);
+        setSubmitting(false);
+        return;
       }
+      xeroInvoiceId = body.xeroInvoiceId || null;
     } catch (err) {
-      console.error("Failed to reach server:", err);
+      setSaveError("Could not reach the server. Make sure node server.js is running on port 3001.");
+      setSubmitting(false);
+      return;
     }
 
-    // Update local state regardless of server outcome
+    // Only update local state after confirmed server save
     lineItems.forEach(item => {
       addTransaction({
         ...header,
@@ -302,6 +310,7 @@ export default function AddB2B() {
 
     const newId = Math.max(0, ...transactions.map(t => t.id)) + 1;
     setSavedEntry({ ...header, lineItems: form.lineItems, id: newId, xeroInvoiceId });
+    setSubmitting(false);
     setMode("success");
   }
 
@@ -673,6 +682,13 @@ export default function AddB2B() {
             </div>
           </div>
 
+          {/* ── Save error banner ── */}
+          {saveError && (
+            <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
+              {saveError}
+            </div>
+          )}
+
           {/* ── Submit ── */}
           <div className="flex items-center justify-between pt-2 pb-6">
             <p className="text-xs text-gray-400"><span className="text-red-400">*</span> required fields</p>
@@ -683,9 +699,9 @@ export default function AddB2B() {
                   Cancel
                 </button>
               )}
-              <button type="submit"
-                className="px-5 py-2.5 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-gray-700 transition-colors">
-                {mode === "edit" ? "Update entry" : "Add entry"}
+              <button type="submit" disabled={submitting}
+                className="px-5 py-2.5 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-gray-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                {submitting ? "Saving…" : mode === "edit" ? "Update entry" : "Add entry"}
               </button>
             </div>
           </div>
