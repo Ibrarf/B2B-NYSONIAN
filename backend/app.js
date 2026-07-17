@@ -314,7 +314,7 @@ app.post("/api/b2b-invoice", requireApiKey, writeLimiter, async (req, res) => {
     await upsertClient(header);
   } catch (err) {
     console.error("DB insert error:", err.message);
-    return res.status(500).json({ ok: false, error: "Failed to save entries. Please try again." });
+    return res.status(500).json({ ok: false, error: "Failed to save entries. Please try again.", detail: err.message });
   }
 
   let xeroResult = null;
