@@ -284,27 +284,27 @@ app.patch("/api/fulfillment/:orderNo", requireApiKey, writeLimiter, async (req, 
   }
 
   try {
-    await pool.query(`
-      UPDATE b2b.entries
-      SET fulfillment_status     = $1,
-          fulfilled_month        = COALESCE(NULLIF($2, ''), fulfilled_month),
-          shipment_date          = COALESCE($3::date, shipment_date),
-          delivery               = COALESCE(NULLIF($4, ''), delivery),
-          fulfillment_ready_date = $5::date
-      WHERE COALESCE(NULLIF(order_no, ''), invoice) = $6
-    `, [
-      fulfillmentStatus ?? "",
-      fulfilledMonth    || "",
-      shipmentDate      || null,
-      delivery          || "",
-      readyDate         || null,
-      orderNo,
-    ]);
+    const safeDate = (v) => (v && /^\d{4}-\d{2}-\d{2}$/.test(v)) ? v : null;
+    const WHERE = `WHERE order_no = $1 OR (COALESCE(order_no, '') = '' AND invoice = $1)`;
+
+    // Update non-date fields first
+    await pool.query(
+      `UPDATE b2b.entries SET fulfillment_status = $2, fulfilled_month = COALESCE(NULLIF($3,''),fulfilled_month), delivery = COALESCE(NULLIF($4,''),delivery) ${WHERE}`,
+      [orderNo, fulfillmentStatus ?? "", fulfilledMonth || "", delivery || ""]
+    );
+
+    // Update date fields only when values are provided (avoids null cast type errors)
+    const sd = safeDate(shipmentDate);
+    if (sd) await pool.query(`UPDATE b2b.entries SET shipment_date = $2 ${WHERE}`, [orderNo, sd]);
+
+    const rd = safeDate(readyDate);
+    if (rd) await pool.query(`UPDATE b2b.entries SET fulfillment_ready_date = $2 ${WHERE}`, [orderNo, rd]);
+
     console.log(`[~] Fulfillment updated: order=${orderNo}, status=${fulfillmentStatus}`);
     res.json({ ok: true });
   } catch (err) {
     console.error("Fulfillment update error:", err.message);
-    res.status(500).json({ ok: false, error: "Failed to update fulfillment." });
+    res.status(500).json({ ok: false, error: "Failed to update fulfillment.", detail: err.message });
   }
 });
 
