@@ -3,6 +3,8 @@ import { useData } from "../context/DataContext";
 import StatusBadge from "./StatusBadge";
 import { Search, ChevronUp, ChevronDown, ChevronsUpDown, Trash2, X, Pencil, Check } from "lucide-react";
 
+const API_KEY = import.meta.env.VITE_API_KEY;
+
 const fmt = (n) =>
   n === 0
     ? <span className="text-gray-300 text-xs">Gift</span>
@@ -36,7 +38,7 @@ function EditSelect({ val, onChange, options }) {
 }
 
 export default function TransactionsTable() {
-  const { transactions, removeTransactions, updateTransaction } = useData();
+  const { transactions, removeTransactions, updateTransaction, refreshEntries } = useData();
 
   const [search,        setSearch]        = useState("");
   const [statusFilter,  setStatusFilter]  = useState(ALL);
@@ -47,6 +49,8 @@ export default function TransactionsTable() {
   const [confirmDel,    setConfirmDel]    = useState(false);
   const [editingId,     setEditingId]     = useState(null);
   const [editForm,      setEditForm]      = useState({});
+  const [saving,        setSaving]        = useState(false);
+  const [saveError,     setSaveError]     = useState(null);
 
   const companies = useMemo(() => [ALL, ...new Set(transactions.map(t => t.company))], [transactions]);
   const statuses  = useMemo(() => [ALL, ...new Set(transactions.map(t => t.status))],  [transactions]);
@@ -97,8 +101,31 @@ export default function TransactionsTable() {
     setEditForm({});
   }
 
-  function saveEdit() {
-    updateTransaction(editingId, { ...editForm, total: editTotal });
+  async function saveEdit() {
+    setSaving(true);
+    setSaveError(null);
+    const changes = { ...editForm, total: editTotal };
+    // Optimistic local update
+    updateTransaction(editingId, changes);
+    try {
+      const res = await fetch(`/api/b2b-row/${editingId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+        body: JSON.stringify(changes),
+      });
+      const data = await res.json();
+      if (!data.ok) {
+        setSaveError(data.error || "Save failed");
+        setSaving(false);
+        return;
+      }
+      await refreshEntries();
+    } catch {
+      setSaveError("Network error — changes saved locally only");
+      setSaving(false);
+      return;
+    }
+    setSaving(false);
     setEditingId(null);
     setEditForm({});
     setSelected(new Set());
@@ -183,13 +210,14 @@ export default function TransactionsTable() {
       {editingId && (
         <div className="flex items-center gap-3 px-4 py-2.5 bg-indigo-50 border border-indigo-200 rounded-lg">
           <span className="text-sm font-medium text-indigo-700">Editing row — make your changes directly in the table</span>
+          {saveError && <span className="text-xs text-red-500 font-medium">{saveError}</span>}
           <div className="ml-auto flex items-center gap-2">
-            <button onClick={saveEdit}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 text-white text-xs font-semibold rounded-lg hover:bg-indigo-700 transition-colors">
-              <Check size={13} /> Save
+            <button onClick={saveEdit} disabled={saving}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 text-white text-xs font-semibold rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed">
+              <Check size={13} /> {saving ? "Saving…" : "Save"}
             </button>
-            <button onClick={cancelEdit}
-              className="px-3 py-1.5 text-xs font-medium text-gray-500 border border-gray-200 rounded-lg hover:bg-white transition-colors">
+            <button onClick={cancelEdit} disabled={saving}
+              className="px-3 py-1.5 text-xs font-medium text-gray-500 border border-gray-200 rounded-lg hover:bg-white transition-colors disabled:opacity-50">
               Cancel
             </button>
           </div>

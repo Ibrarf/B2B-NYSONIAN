@@ -20,6 +20,8 @@ const ALLOWED_ORIGINS = [
   "http://localhost:5173",
   "http://localhost:5174",
   "http://localhost:4173",
+  "https://b2b.nysonik.com",
+  "http://b2b.nysonik.com",
   process.env.FRONTEND_URL,
 ].filter(Boolean);
 
@@ -409,6 +411,69 @@ app.patch("/api/b2b-order/:orderNo", requireApiKey, writeLimiter, async (req, re
   } catch (err) {
     console.error("DB update error:", err.message);
     res.status(500).json({ ok: false, error: "Failed to update entry. Please try again." });
+  }
+});
+
+// ── PATCH /api/b2b-row/:id ────────────────────────────────────────────────────
+// Inline-edit a single row in b2b.entries by its integer id.
+app.patch("/api/b2b-row/:id", requireApiKey, writeLimiter, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isInteger(id) || id <= 0) {
+    return res.status(400).json({ ok: false, error: "Invalid id" });
+  }
+
+  const FIELD_MAP = {
+    customer:        { col: "customer",          fn: v => (isStr(v, 200) ? v.trim() : null) },
+    company:         { col: "company",           fn: v => (isStr(v, 200) ? v.trim() : null) },
+    product:         { col: "product",           fn: v => (isStr(v, 300) ? v.trim() : null) },
+    invoice:         { col: "invoice",           fn: v => (isStr(v, 100) ? v.trim() : null) },
+    invoiceDate:     { col: "invoice_date",      fn: v => isDate(v) ? (v || null) : null },
+    sku:             { col: "sku",               fn: v => (isStr(v, 100) ? v.trim() : null) },
+    qty:             { col: "qty",               fn: v => (isNum(Number(v)) ? Number(v) : null) },
+    unitPrice:       { col: "unit_price",        fn: v => (isNum(Number(v)) ? Number(v) : null) },
+    total:           { col: "total",             fn: v => (isNum(Number(v)) ? Number(v) : null) },
+    paymentTerms:    { col: "payment_terms",     fn: v => ALLOWED_PAYMENT_TERMS.includes(v) ? v : null },
+    dueDate:         { col: "due_date",          fn: v => isDate(v) ? (v || null) : null },
+    orderNo:         { col: "order_no",          fn: v => (isStr(v, 30) ? v.trim() : null) },
+    status:          { col: "status",            fn: v => ALLOWED_STATUS.includes(v) ? v : null },
+    paymentRecDate:  { col: "payment_rec_date",  fn: v => isDate(v) ? (v || null) : null },
+    shipmentDate:    { col: "shipment_date",     fn: v => isDate(v) ? (v || null) : null },
+    delivery:        { col: "delivery",          fn: v => ALLOWED_DELIVERY.includes(v) ? v : null },
+    fulfilledMonth:  { col: "fulfilled_month",   fn: v => (isStr(v, 50) ? v : null) },
+    paymentRecMonth: { col: "payment_rec_month", fn: v => (isStr(v, 50) ? v : null) },
+    remarks:         { col: "remarks",           fn: v => (isStr(v, 1000) ? v : null) },
+    financeRemarks:  { col: "finance_remarks",   fn: v => (isStr(v, 1000) ? v : null) },
+  };
+
+  const setClauses = [];
+  const values     = [];
+
+  for (const [jsKey, { col, fn }] of Object.entries(FIELD_MAP)) {
+    if (!(jsKey in req.body)) continue;
+    const safe = fn(req.body[jsKey]);
+    if (safe === null && req.body[jsKey] !== "" && req.body[jsKey] !== null) {
+      return res.status(400).json({ ok: false, error: `Invalid value for ${jsKey}` });
+    }
+    values.push(safe);
+    setClauses.push(`${col} = $${values.length}`);
+  }
+
+  if (setClauses.length === 0) {
+    return res.status(400).json({ ok: false, error: "No valid fields to update" });
+  }
+
+  values.push(id);
+  try {
+    const { rowCount } = await pool.query(
+      `UPDATE b2b.entries SET ${setClauses.join(", ")} WHERE id = $${values.length}`,
+      values
+    );
+    if (rowCount === 0) return res.status(404).json({ ok: false, error: "Row not found" });
+    console.log(`[~] Row ${id} updated: ${setClauses.map(c => c.split(" = ")[0]).join(", ")}`);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("Row patch error:", err.message);
+    res.status(500).json({ ok: false, error: "Failed to update row." });
   }
 });
 
