@@ -834,7 +834,7 @@ app.patch("/api/b2b-row/:id", requireApiKey, writeLimiter, async (req, res) => {
 // Verifies an order number exists in ShipHero. Returns order details on success.
 app.get("/api/shiphero/verify-order/:orderNo", requireApiKey, readLimiter, async (req, res) => {
   const orderNo = (req.params.orderNo || "").trim().toUpperCase();
-  if (!orderNo || orderNo.length > 50 || !/^[A-Z0-9\-]+$/.test(orderNo)) {
+  if (!orderNo || orderNo.length > 50 || !/^[#A-Z0-9\-]+$/.test(orderNo)) {
     return res.status(400).json({ ok: false, error: "Invalid order number format" });
   }
 

@@ -76,7 +76,26 @@ async function verifyOrder(orderNumber) {
     throw new Error(`ShipHero error: ${msg}`);
   }
 
-  const edges = json?.data?.orders?.data?.edges ?? [];
+  let edges = json?.data?.orders?.data?.edges ?? [];
+
+  // ShipHero sometimes stores orders with a # prefix (e.g. #779924).
+  // If not found, retry with # prepended (only if not already prefixed).
+  if (edges.length === 0 && !orderNumber.startsWith("#")) {
+    const retry = await fetch(SHIPHERO_GQL, {
+      method:  "POST",
+      headers: {
+        "Content-Type":  "application/json",
+        "Authorization": `Bearer ${getToken()}`,
+      },
+      body: JSON.stringify({
+        query:     VERIFY_QUERY,
+        variables: { orderNo: `#${orderNumber}` },
+      }),
+    });
+    const retryJson = await retry.json();
+    edges = retryJson?.data?.orders?.data?.edges ?? [];
+  }
+
   if (edges.length === 0) return { found: false };
 
   const node = edges[0].node;
