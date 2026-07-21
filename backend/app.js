@@ -11,6 +11,9 @@ const { verifyOrder }    = require("./shiphero");
 
 const app = express();
 
+// ── Trust proxy (nginx sits in front) ────────────────────────────────────────
+app.set("trust proxy", 1);
+
 // ── Security headers ──────────────────────────────────────────────────────────
 app.use(helmet());
 
