@@ -119,12 +119,13 @@ function SectionTitle({ children }) {
 // ── Main component ────────────────────────────────────────────────────────────
 export default function AddB2B() {
   const { refreshEntries, transactions } = useData();
-  const [form,       setForm]       = useState(emptyForm);
-  const [errors,     setErrors]     = useState({});
-  const [mode,       setMode]       = useState("add"); // "add" | "success" | "edit"
-  const [savedEntry, setSavedEntry] = useState(null);
-  const [saveError,  setSaveError]  = useState(null);
-  const [submitting, setSubmitting] = useState(false);
+  const [form,            setForm]           = useState(emptyForm);
+  const [errors,          setErrors]         = useState({});
+  const [mode,            setMode]           = useState("add"); // "add" | "success" | "edit"
+  const [savedEntry,      setSavedEntry]     = useState(null);
+  const [saveError,       setSaveError]      = useState(null);
+  const [submitting,      setSubmitting]     = useState(false);
+  const [orderNoVerified, setOrderNoVerified] = useState(false);
 
   // Auto-generate next invoice number when form resets to empty.
   // Scans all existing invoices (numeric "1012" or "INV-012") to find the true max.
@@ -169,6 +170,7 @@ export default function AddB2B() {
   function set(key, val) {
     setForm(f => ({ ...f, [key]: val }));
     if (errors[key]) setErrors(e => ({ ...e, [key]: false }));
+    if (key === "orderNo") setOrderNoVerified(false);
   }
 
   // ── Line item handlers ────────────────────────────────────────────────────
@@ -257,6 +259,7 @@ export default function AddB2B() {
     if (!form.invoice.trim())   e.invoice     = true;
     if (!form.invoiceDate)      e.invoiceDate = true;
     if (!form.dueDate)          e.dueDate     = true;
+    if (!orderNoVerified)       e.orderNo     = true;
     form.lineItems.forEach((item, idx) => {
       const qty = Number(item.qty);
       if (!item.qty || isNaN(qty) || qty <= 0 || !Number.isInteger(qty)) e[`li_${idx}_qty`] = true;
@@ -350,6 +353,7 @@ export default function AddB2B() {
       financeRemarks:  f.financeRemarks  || "",
     });
     setErrors({});
+    setOrderNoVerified(true); // existing orders already have a confirmed order number
     setMode("edit");
   }
 
@@ -439,7 +443,7 @@ export default function AddB2B() {
             <p className="text-sm text-gray-300 mb-1">Xero sync pending</p>
           )}
           <p className="text-sm text-gray-400 mb-6">Visible across Dashboard, Transactions, and Client Tracker.</p>
-          <button onClick={() => { setForm(emptyForm()); setErrors({}); setSavedEntry(null); setMode("add"); }}
+          <button onClick={() => { setForm(emptyForm()); setErrors({}); setSavedEntry(null); setMode("add"); setOrderNoVerified(false); }}
             className="px-6 py-2.5 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-gray-700 transition-colors">
             Done
           </button>
@@ -518,10 +522,46 @@ export default function AddB2B() {
                   <p className="text-[11px] text-gray-400 mt-1">Customer's purchase order number</p>
                 </div>
                 <div>
-                  <Label>Order #</Label>
-                  <input value={form.orderNo} readOnly
-                    className="w-full px-3 py-2 bg-gray-50 border border-gray-100 rounded-lg text-sm font-mono text-indigo-700 font-semibold focus:outline-none cursor-default" />
-                  <p className="text-[11px] text-gray-400 mt-1">Auto-generated · unique per entry</p>
+                  <Label req>Order #</Label>
+                  <div className="flex gap-2 items-stretch">
+                    <input
+                      value={form.orderNo}
+                      onChange={e => set("orderNo", e.target.value.toUpperCase())}
+                      placeholder="MO-YYMMDD-XXXX"
+                      className={`flex-1 px-3 py-2.5 border rounded-lg text-sm font-mono font-semibold focus:outline-none focus:ring-2 transition-all ${
+                        orderNoVerified
+                          ? "bg-emerald-50 border-emerald-300 text-emerald-700 focus:ring-emerald-300"
+                          : errors.orderNo
+                          ? "bg-red-50 border-red-300 text-gray-800 focus:ring-red-300"
+                          : "bg-white border-gray-200 text-indigo-700 focus:ring-indigo-400"
+                      }`}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!form.orderNo.trim()) return;
+                        setOrderNoVerified(true);
+                        setErrors(e => ({ ...e, orderNo: false }));
+                      }}
+                      title="Confirm order number"
+                      className={`px-3 rounded-lg border text-sm font-semibold transition-all flex items-center gap-1.5 ${
+                        orderNoVerified
+                          ? "bg-emerald-600 border-emerald-600 text-white"
+                          : "bg-white border-gray-200 text-gray-500 hover:border-indigo-400 hover:text-indigo-600"
+                      }`}
+                    >
+                      {orderNoVerified ? "✓ Verified" : "Confirm"}
+                    </button>
+                  </div>
+                  {errors.orderNo && !orderNoVerified && (
+                    <p className="text-[11px] text-red-500 mt-1">Enter the order number and click Confirm</p>
+                  )}
+                  {orderNoVerified && (
+                    <p className="text-[11px] text-emerald-600 mt-1">✓ Order number confirmed</p>
+                  )}
+                  {!orderNoVerified && !errors.orderNo && (
+                    <p className="text-[11px] text-gray-400 mt-1">Type the order number then click Confirm</p>
+                  )}
                 </div>
               </div>
             </SectionCard>
