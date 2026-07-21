@@ -7,6 +7,7 @@ const helmet             = require("helmet");
 const rateLimit          = require("express-rate-limit");
 const { Pool }           = require("pg");
 const { createInvoice }  = require("./xero");
+const { verifyOrder }    = require("./shiphero");
 
 const app = express();
 
@@ -826,6 +827,31 @@ app.patch("/api/b2b-row/:id", requireApiKey, writeLimiter, async (req, res) => {
     res.status(500).json({ ok: false, error: "Failed to update row." });
   } finally {
     client.release();
+  }
+});
+
+// ── GET /api/shiphero/verify-order/:orderNo ───────────────────────────────────
+// Verifies an order number exists in ShipHero. Returns order details on success.
+app.get("/api/shiphero/verify-order/:orderNo", requireApiKey, readLimiter, async (req, res) => {
+  const orderNo = (req.params.orderNo || "").trim().toUpperCase();
+  if (!orderNo || orderNo.length > 50 || !/^[A-Z0-9\-]+$/.test(orderNo)) {
+    return res.status(400).json({ ok: false, error: "Invalid order number format" });
+  }
+
+  try {
+    const result = await verifyOrder(orderNo);
+    if (!result.found) {
+      return res.status(404).json({ ok: false, error: `Order "${orderNo}" not found in ShipHero` });
+    }
+    console.log(`[ShipHero] Verified order ${orderNo} — status: ${result.order.fulfillment_status}`);
+    return res.json({ ok: true, order: result.order });
+  } catch (err) {
+    console.error("[ShipHero] verify-order error:", err.message);
+    // Surface token-expired errors clearly
+    if (err.message.includes("token expired") || err.message.includes("SHIPHERO_TOKEN")) {
+      return res.status(503).json({ ok: false, error: err.message });
+    }
+    return res.status(502).json({ ok: false, error: "ShipHero lookup failed. Try again." });
   }
 });
 
